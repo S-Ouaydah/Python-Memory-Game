@@ -122,8 +122,9 @@ def main() -> None:
         print("Pillow not installed; skipping preview.webp")
     else:
         images = [Image.frombytes("RGB", f.get_size(), pygame.image.tobytes(f, "RGB")) for f in frames]
-        images[0].save(out / "preview.webp", save_all=True, append_images=images[1:], duration=50, loop=0,
-                       quality=72, method=6)
+        images[0].save(
+            out / "preview.webp", save_all=True, append_images=images[1:], duration=50, loop=0, quality=72, method=6
+        )
         print("saved", out / "preview.webp", f"({len(images)} frames)")
     app.shutdown()
 
