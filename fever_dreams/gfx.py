@@ -157,6 +157,22 @@ def radial_glow(diameter: int, color: Color, falloff: float = 2.2) -> pygame.Sur
     return pygame.transform.smoothscale(small, (d, d))
 
 
+@lru_cache(maxsize=64)
+def soft_blob(diameter: int, color: Color, alpha: int = 160, falloff: float = 1.8) -> pygame.Surface:
+    """A translucent disc fading to nothing at its edge, for normal alpha blending."""
+    base = 128
+    small = pygame.Surface((base, base), pygame.SRCALPHA)
+    small.fill((*color[:3], 0))
+    half = base / 2
+    steps = 48
+    for i in range(steps, 0, -1):  # inner circles overwrite outer ones
+        k = (1 - i / steps) ** falloff
+        pygame.draw.circle(small, (*color[:3], int(alpha * k)), (half, half), half * i / steps)
+    small = pygame.transform.box_blur(small, 3)
+    d = max(2, int(diameter))
+    return pygame.transform.smoothscale(small, (d, d))
+
+
 def soft_shadow(
     size: tuple[int, int], radius: int, blur: int, alpha: int = 150, color: Color = (0, 0, 0)
 ) -> pygame.Surface:
@@ -351,6 +367,13 @@ def icon(name: str, size: int, color: Color) -> pygame.Surface:
         _poly(big, col, [(2.5, 5), (10.5, 5.5), (12, 7), (12, 20), (10.5, 18.8), (2.5, 18.5)], k)
         _poly(big, col, [(21.5, 5), (13.5, 5.5), (12, 7), (12, 20), (13.5, 18.8), (21.5, 18.5)], k)
         _stroke(big, clear, [(12, 6), (12, 21)], k, 1.2)
+    elif name == "users":
+        pygame.draw.circle(big, col, (16 * k, 7.6 * k), 3.3 * k)
+        pygame.draw.ellipse(big, col, (10.5 * k, 12.6 * k, 11 * k, 13 * k))
+        pygame.draw.circle(big, clear, (9 * k, 9 * k), 5.2 * k)
+        pygame.draw.ellipse(big, clear, (1.2 * k, 13.6 * k, 15.6 * k, 15 * k))
+        pygame.draw.circle(big, col, (9 * k, 9 * k), 3.6 * k)
+        pygame.draw.ellipse(big, col, (3 * k, 15.4 * k, 12 * k, 13 * k))
     elif name == "trophy":
         _ring(big, col, clear, (6.5, 7.5), 3.6, 2.0, k)
         _ring(big, col, clear, (17.5, 7.5), 3.6, 2.0, k)

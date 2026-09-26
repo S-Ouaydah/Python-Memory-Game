@@ -75,3 +75,13 @@ def test_unwritable_location_does_not_raise(tmp_path):
 def test_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("FEVER_DREAMS_HOME", str(tmp_path))
     assert default_data_dir() == tmp_path
+
+
+def test_player_count_is_saved_and_clamped(tmp_path):
+    path = tmp_path / "save.json"
+    save = SaveData.load(path)
+    save.settings.players = 3
+    save.save()
+    assert SaveData.load(path).settings.players == 3
+    path.write_text(json.dumps({"settings": {"players": 9}}), encoding="utf-8")
+    assert SaveData.load(path).settings.players == 1

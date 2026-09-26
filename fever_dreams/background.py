@@ -34,7 +34,7 @@ def mote_sprite(diameter: int, color: tuple) -> pygame.Surface:
     return gfx.glow(gfx.circle(d, color), max(2, d), color, strength=2.0)
 
 
-def make_vignette(size: tuple[int, int], strength: int = 185) -> pygame.Surface:
+def make_vignette(size: tuple[int, int], strength: int = 70) -> pygame.Surface:
     sw, sh = 96, 60
     small = pygame.Surface((sw, sh), pygame.SRCALPHA)
     for y in range(sh):
@@ -43,7 +43,7 @@ def make_vignette(size: tuple[int, int], strength: int = 185) -> pygame.Surface:
             dx = (x + 0.5) / sw * 2 - 1
             d = math.sqrt(dx * dx * 0.85 + dy * dy * 1.1)
             a = max(0.0, min(1.0, (d - 0.5) / 0.8)) ** 1.7
-            small.set_at((x, y), (6, 3, 14, int(a * strength)))
+            small.set_at((x, y), (*Palette.LAVENDER_DEEP, int(a * strength)))
     return pygame.transform.smoothscale(small, size)
 
 
@@ -74,7 +74,7 @@ class Mote:
         self.phase = rng.uniform(0, math.tau)
         self.speed = rng.uniform(0.6, 1.8)
         self.sway = rng.uniform(4, 14)
-        color = rng.choice((Palette.GOLD_LIGHT, (255, 255, 255), Palette.ROSE, Palette.LAVENDER))
+        color = rng.choice((Palette.GOLD, Palette.ROSE, Palette.LAVENDER, Palette.SKY, (255, 255, 255)))
         self.sprite = mote_sprite(rng.choice((2, 2, 3, 4)), color)
 
 
@@ -99,11 +99,11 @@ class DreamBackground:
         #: Extra brightness pulse (e.g. on a match); decays by itself.
         self.flash = 0.0
         self.blobs = [
-            Blob((80, 50, 134), 0.95, 0.22, 0.30, 0.10, 0.08, 0.045, 0.061, 0.0),
-            Blob((140, 54, 108), 0.85, 0.80, 0.25, 0.09, 0.10, 0.052, 0.037, 1.7),
-            Blob((44, 78, 146), 0.80, 0.70, 0.85, 0.12, 0.07, 0.033, 0.049, 3.1),
-            Blob((122, 70, 80), 0.60, 0.25, 0.92, 0.10, 0.06, 0.041, 0.057, 4.4),
-            Blob((60, 30, 92), 0.70, 0.50, 0.55, 0.16, 0.12, 0.027, 0.031, 5.2),
+            Blob(Palette.LAVENDER, 0.95, 0.20, 0.28, 0.10, 0.08, 0.045, 0.061, 0.0),
+            Blob(Palette.ROSE, 0.85, 0.82, 0.22, 0.09, 0.10, 0.052, 0.037, 1.7),
+            Blob(Palette.SKY, 0.80, 0.72, 0.86, 0.12, 0.07, 0.033, 0.049, 3.1),
+            Blob(Palette.MINT, 0.62, 0.22, 0.90, 0.10, 0.06, 0.041, 0.057, 4.4),
+            Blob(Palette.BUTTER, 0.70, 0.50, 0.55, 0.16, 0.12, 0.027, 0.031, 5.2),
         ]
         self.petals: list[Petal] = []
         self.motes: list[Mote] = []
@@ -116,7 +116,7 @@ class DreamBackground:
         self.vignette = make_vignette((w, h)).convert_alpha()
         span = max(w, h)
         for blob in self.blobs:
-            blob.surf = gfx.radial_glow(int(span * blob.scale), blob.color).convert()
+            blob.surf = gfx.soft_blob(int(span * blob.scale), blob.color, 170).convert_alpha()
         self.petals = [Petal(self.rng, w, h, anywhere=True) for _ in range(self.PETAL_COUNT)]
         self.motes = [Mote(self.rng, w, h) for _ in range(self.MOTE_COUNT)]
 
@@ -147,9 +147,9 @@ class DreamBackground:
             bw = blob.surf.get_width()
             x = (blob.cx + blob.ax * math.sin(t * blob.fx * math.tau + blob.phase)) * w
             y = (blob.cy + blob.ay * math.cos(t * blob.fy * math.tau + blob.phase)) * h
-            surface.blit(blob.surf, (x - bw / 2, y - bw / 2), special_flags=pygame.BLEND_RGB_ADD)
+            surface.blit(blob.surf, (x - bw / 2, y - bw / 2))
         if self.flash > 0:
-            surface.fill(tuple(int(c * self.flash * 0.18) for c in Palette.GOLD), special_flags=pygame.BLEND_RGB_ADD)
+            surface.fill((int(self.flash * 16),) * 3, special_flags=pygame.BLEND_RGB_ADD)
         if self.ambient:
             for m in self.motes:
                 twinkle = 0.5 + 0.5 * math.sin(t * m.speed * 2 + m.phase)

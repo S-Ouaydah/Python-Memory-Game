@@ -160,3 +160,56 @@ def test_back_to_menu_from_pause(app):
     scene.modal.menu.activate()
     run(app, 1.0)
     assert isinstance(app.scene, MenuScene)
+
+
+def test_hot_seat_turns_colours_and_results(app):
+    app.save.settings.players = 2
+    scene = start_game(app, "serene")
+    assert scene.multiplayer and not scene.glimpse_button.visible
+    game = scene.game
+    pairs = pairs_of(game)
+
+    # Player 1 matches and keeps the turn, then misses and hands over.
+    run(app, 0.1, click(scene.sprites[pairs[0][0]].rect.center))
+    run(app, 0.6, click(scene.sprites[pairs[0][1]].rect.center))
+    assert game.current == 0
+    assert scene.sprites[pairs[0][0]].match_color == scene.player_color(0)
+    run(app, 0.1, click(scene.sprites[pairs[1][0]].rect.center))
+    run(app, 0.6, click(scene.sprites[pairs[2][0]].rect.center))
+    assert game.current == 1
+    assert scene.banner_player == 1
+
+    # Player 2 clears the rest of the board (starting away from the face-up
+    # wrong pair, since clicking one of those only dismisses it).
+    for i, j in pairs[1:]:
+        run(app, 0.1, click(scene.sprites[j].rect.center))
+        run(app, 0.1, click(scene.sprites[i].rect.center))
+    run(app, 3.0)
+    assert game.player_pairs == [1, 5] and game.leaders == [1]
+    assert scene.sprites[pairs[3][0]].match_color == scene.player_color(1)
+    assert isinstance(scene.modal, ResultsModal)
+    assert scene.modal.again.label == "Rematch"
+    assert app.save.record("serene").wins == 0  # hot-seat games don't touch solo records
+
+    run(app, 1.0, [key(pygame.K_r)])
+    assert isinstance(app.scene, GameScene) and app.scene.players == 2
+
+
+def test_player_chips_on_the_menu(app):
+    run(app, 1.5)
+    menu = app.scene
+    run(app, 0.1, click(menu.chips[2].rect.center))
+    assert app.save.settings.players == 3
+    run(app, 1.0, [key(pygame.K_2)])
+    assert isinstance(app.scene, GameScene) and app.scene.players == 3
+
+
+def test_fifty_pair_board_uses_distinct_variant_faces(app):
+    scene = start_game(app, "delirium")
+    faces = [c.face for c in scene.game.cards]
+    assert len(faces) == 100 and len(set(faces)) == 50
+    assert max(faces) >= app.art.count  # mirrored / close-up variants in play
+    window = pygame.Rect(0, 0, *app.size)
+    assert all(window.contains(s.rect) for s in scene.sprites)
+    run(app, 0.3, click(scene.sprites[99].rect.center))
+    assert scene.game.first == 99

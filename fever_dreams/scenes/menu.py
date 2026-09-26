@@ -1,4 +1,4 @@
-"""Title screen: pick a difficulty, read the rules, change settings."""
+"""Title screen: pick players and a difficulty, read the rules, change settings."""
 
 from __future__ import annotations
 
@@ -13,13 +13,14 @@ from .. import gfx
 from ..config import CARD_ASPECT, DIFFICULTIES, Difficulty, Palette
 from ..layout import compute_grid
 from ..tween import approach, ease_out_cubic
-from ..widgets import Button, FocusGroup, Toggle, Widget
+from ..widgets import Button, Chip, FocusGroup, Toggle, Widget
 from .base import Modal, Scene
 
 if TYPE_CHECKING:
     from ..app import App
 
-TITLE_STOPS = ((0.0, Palette.GOLD_LIGHT), (0.55, (255, 200, 190)), (1.0, Palette.ROSE))
+TITLE_STOPS = ((0.0, (228, 104, 158)), (0.5, (190, 106, 198)), (1.0, (118, 110, 216)))
+MAX_PLAYERS = 4
 
 HELP_ITEMS = (
     (
@@ -27,11 +28,16 @@ HELP_ITEMS = (
         "Find the twins",
         "Turn over two cards at a time. Matching dreamers stay revealed; the rest drift back.",
     ),
-    ("star", "Build a combo", "Consecutive matches raise your multiplier, up to ×3 points per pair."),
-    ("eye", "Glimpse", "Once per game, see every card for a moment. It costs 250 points."),
+    ("star", "Build a combo", "Consecutive matches raise your multiplier, up to \u00d73 points per pair."),
+    (
+        "users",
+        "Play together",
+        "Up to four players take turns on one screen. A match earns another go; a miss passes the turn.",
+    ),
+    ("eye", "Glimpse", "Once per solo game, see every card for a moment. It costs 250 points."),
     ("trophy", "Chase your best", "Finish under par for a time bonus. Fewer moves earn more stars."),
 )
-CONTROLS = "Mouse or arrows + Space  ·  G glimpse  ·  R restart  ·  Esc pause  ·  F11 fullscreen"
+CONTROLS = "Mouse or arrows + Space  \u00b7  G glimpse  \u00b7  R restart  \u00b7  Esc pause  \u00b7  F11 fullscreen"
 
 
 def _reveal(age: float, delay: float, duration: float = 0.7) -> float:
@@ -39,10 +45,9 @@ def _reveal(age: float, delay: float, duration: float = 0.7) -> float:
 
 
 class DifficultyTile(Widget):
-    def __init__(self, app: App, difficulty: Difficulty, number: int, on_click: Callable[[], None]) -> None:
+    def __init__(self, app: App, difficulty: Difficulty, on_click: Callable[[], None]) -> None:
         super().__init__(app)
         self.difficulty = difficulty
-        self.number = number
         self.on_click = on_click
         grid = compute_grid(difficulty.pairs * 2, (0, 0, 1200, 620), CARD_ASPECT)
         self.grid = (grid.cols, grid.rows)
@@ -59,39 +64,43 @@ class DifficultyTile(Widget):
         x, y = self.rect.x, self.rect.y - lift
         radius = int(20 * s)
 
-        glow = gfx.soft_shadow((w, h), radius, max(6, int(18 * s)), alpha=120, color=Palette.GOLD)
-        gfx.blit_center(surface, glow, (x + w / 2, y + h / 2 + 6 * s), alpha * self.hover * 0.55)
-        base = gfx.rounded_rect((w, h), radius, (255, 255, 255, 14), 1, (255, 255, 255, 38))
-        lit = gfx.rounded_rect((w, h), radius, (255, 255, 255, 28), 1, (*Palette.GOLD_LIGHT, 200))
+        glow = gfx.soft_shadow((w, h), radius, max(6, int(18 * s)), alpha=110, color=Palette.ROSE)
+        gfx.blit_center(surface, glow, (x + w / 2, y + h / 2 + 6 * s), alpha * (0.25 + 0.75 * self.hover))
+        base = gfx.rounded_rect((w, h), radius, Palette.GLASS, 1, Palette.GLASS_EDGE)
+        lit = gfx.rounded_rect((w, h), radius, Palette.GLASS_HOVER, 1, (*Palette.ROSE_DEEP, 170))
         gfx.blit_alpha(surface, base, (x, y), alpha)
         gfx.blit_alpha(surface, lit, (x, y), alpha * self.hover)
 
-        pad = int(20 * s)
-        name = gfx.text(
-            fonts.get("display", 36 * s), self.difficulty.name, Palette.GOLD_LIGHT if self.hover > 0.5 else Palette.INK
-        )
+        pad = int(18 * s)
+        name_color = Palette.ACCENT if self.hover > 0.5 else Palette.INK
+        name = gfx.text(fonts.get("display", 32 * s), self.difficulty.name, name_color)
         gfx.blit_alpha(surface, name, (x + pad, y + int(10 * s)), alpha)
 
         cards = self.difficulty.pairs * 2
         meta = gfx.text(
-            fonts.get("regular", 14 * s), f"{self.difficulty.pairs} pairs · {cards} cards", Palette.INK_MUTED
+            fonts.get("regular", 13 * s), f"{self.difficulty.pairs} pairs \u00b7 {cards} cards", Palette.INK_MUTED
         )
-        my = y + int(10 * s) + name.get_height() - int(6 * s)
-        gfx.blit_alpha(surface, meta, (x + pad, my), alpha)
+        gfx.blit_alpha(surface, meta, (x + pad, y + int(10 * s) + name.get_height() - int(6 * s)), alpha)
 
+        players = self.app.save.settings.players
         record = self.app.save.record(self.difficulty.key)
         ry = y + h - pad - int(14 * s)
-        if record.wins:
+        if players > 1:
+            icon = gfx.icon("users", int(16 * s), Palette.INK_SOFT)
+            gfx.blit_alpha(surface, icon, (x + pad, ry - int(1 * s)), alpha)
+            label = gfx.text(fonts.get("medium", 13 * s), f"Hot-seat \u00b7 {players} players", Palette.INK_SOFT)
+            gfx.blit_alpha(surface, label, (x + pad + int(22 * s), ry + (int(16 * s) - label.get_height()) // 2), alpha)
+        elif record.wins:
             star_size = int(15 * s)
             for i in range(3):
-                color = Palette.GOLD if i < record.best_stars else (255, 255, 255, 60)
+                color = Palette.GOLD if i < record.best_stars else Palette.LINE
                 gfx.blit_alpha(
                     surface,
                     gfx.icon("star", star_size, color),
                     (x + pad + i * (star_size + int(2 * s)), ry - int(1 * s)),
                     alpha,
                 )
-            best = f"{record.best_score:,} pts · {gfx.format_time(record.best_time or 0)}"
+            best = f"{record.best_score:,} \u00b7 {gfx.format_time(record.best_time or 0)}"
             label = gfx.text(fonts.get("medium", 13 * s), best, Palette.INK_SOFT)
             gfx.blit_alpha(
                 surface,
@@ -104,26 +113,17 @@ class DifficultyTile(Widget):
             gfx.blit_alpha(surface, label, (x + pad, ry), alpha)
 
         # Miniature of the board layout.
-        cols, rows = self.grid
-        dot_w, dot_h, gap = max(2, int(5 * s)), max(3, int(8 * s)), max(1, int(2 * s))
-        gw = cols * dot_w + (cols - 1) * gap
-        gx = x + w - pad - gw
+        cols, _rows = self.grid
+        dot_w, dot_h, gap = max(2, int(4 * s)), max(3, int(6 * s)), max(1, int(2 * s))
+        gx = x + w - pad - (cols * dot_w + (cols - 1) * gap)
         gy = y + pad
-        color = Palette.GOLD_LIGHT if self.hover > 0.5 else (255, 255, 255, 70)
-        dot = gfx.rounded_rect((dot_w, dot_h), max(1, int(1.5 * s)), color)
+        color = Palette.ROSE_DEEP if self.hover > 0.5 else (*Palette.LAVENDER_DEEP, 110)
+        dot = gfx.rounded_rect((dot_w, dot_h), max(1, int(1.2 * s)), color)
         for i in range(cards):
             r, c = divmod(i, cols)
             in_row = min(cols, cards - r * cols)
             ox = (cols - in_row) * (dot_w + gap) // 2
             gfx.blit_alpha(surface, dot, (gx + ox + c * (dot_w + gap), gy + r * (dot_h + gap)), alpha)
-
-        key = gfx.text(fonts.get("medium", 12 * s), str(self.number), Palette.INK_FAINT)
-        gfx.blit_alpha(
-            surface,
-            key,
-            (x + w - pad - key.get_width(), y + h - pad - key.get_height()),
-            alpha * (0.4 + 0.6 * self.app.keyboard_mode),
-        )
         self.draw_focus(surface, radius, alpha)
 
 
@@ -154,7 +154,7 @@ class CardFan:
         self.card_h = max(2, int(card_h))
         self.card_w = max(2, int(card_h * CARD_ASPECT))
         self._cache.clear()
-        self._glow = gfx.radial_glow(int(self.card_h * 2.4), (120, 50, 110)).convert()
+        self._glow = gfx.soft_blob(int(self.card_h * 2.6), (255, 255, 255), 200).convert_alpha()
 
     def _base(self, i: int) -> pygame.Surface:
         size = (self.card_w, self.card_h)
@@ -203,9 +203,7 @@ class CardFan:
         s = self.app.ui
         cx, cy = self.center
         glow = self._glow
-        surface.blit(
-            glow, (cx - glow.get_width() // 2, cy - glow.get_height() // 2), special_flags=pygame.BLEND_RGB_ADD
-        )
+        gfx.blit_center(surface, glow, (cx, cy), alpha)
         for i in self.ORDER:
             k = i - 2
             depth = 1.0 - abs(k) * 0.18
@@ -242,7 +240,7 @@ class HelpModal(Modal):
 
     def layout(self, size: tuple[int, int]) -> None:
         s = self.app.ui
-        w, h = int(620 * s), int(516 * s)
+        w, h = int(640 * s), int(590 * s)
         self.panel = pygame.Rect((size[0] - w) // 2, (size[1] - h) // 2, w, h)
         bw, bh = int(180 * s), int(50 * s)
         self.ok.rect = pygame.Rect(self.panel.centerx - bw // 2, self.panel.bottom - bh - int(30 * s), bw, bh)
@@ -251,7 +249,7 @@ class HelpModal(Modal):
         s = self.app.ui
         fonts = self.app.fonts
         pad = int(40 * s)
-        over = gfx.text(fonts.get("medium", 12 * s), "THE RULES OF THE DREAM", Palette.GOLD, tracking=3.5 * s)
+        over = gfx.text(fonts.get("medium", 12 * s), "THE RULES OF THE DREAM", Palette.ACCENT, tracking=3.5 * s)
         gfx.blit_alpha(surface, over, (panel.x + pad, panel.y + int(34 * s)), alpha)
         title = gfx.text(fonts.get("display", 46 * s), "How to play", Palette.INK)
         gfx.blit_alpha(surface, title, (panel.x + pad, panel.y + int(50 * s)), alpha)
@@ -260,11 +258,11 @@ class HelpModal(Modal):
         text_x = panel.x + pad + int(52 * s)
         text_w = panel.w - (text_x - panel.x) - pad
         for icon_name, heading, body in HELP_ITEMS:
-            bubble = gfx.circle(int(38 * s), (255, 255, 255, 22))
+            bubble = gfx.circle(int(38 * s), (255, 255, 255, 200))
             gfx.blit_alpha(surface, bubble, (panel.x + pad, y), alpha)
             gfx.blit_center(
                 surface,
-                gfx.icon(icon_name, int(20 * s), Palette.GOLD_LIGHT),
+                gfx.icon(icon_name, int(20 * s), Palette.ACCENT),
                 (panel.x + pad + 19 * s, y + 19 * s),
                 alpha,
             )
@@ -335,7 +333,7 @@ class SettingsModal(Modal):
         s = self.app.ui
         fonts = self.app.fonts
         pad = int(32 * s)
-        over = gfx.text(fonts.get("medium", 12 * s), "PREFERENCES", Palette.GOLD, tracking=3.5 * s)
+        over = gfx.text(fonts.get("medium", 12 * s), "PREFERENCES", Palette.ACCENT, tracking=3.5 * s)
         gfx.blit_alpha(surface, over, (panel.x + pad, panel.y + int(34 * s)), alpha)
         title = gfx.text(fonts.get("display", 46 * s), "Settings", Palette.INK)
         gfx.blit_alpha(surface, title, (panel.x + pad, panel.y + int(50 * s)), alpha)
@@ -348,27 +346,42 @@ class MenuScene(Scene):
     def __init__(self, app: App, intro: bool = True) -> None:
         super().__init__(app)
         self.age = 0.0 if intro else 0.45
-        self.tiles = [DifficultyTile(app, d, i + 1, lambda d=d: self.start(d)) for i, d in enumerate(DIFFICULTIES)]
+        self.chips = [
+            Chip(
+                app,
+                "Solo" if n == 1 else str(n),
+                lambda n=n: app.save.settings.players == n,
+                lambda n=n: self.set_players(n),
+            )
+            for n in range(1, MAX_PLAYERS + 1)
+        ]
+        self.tiles = [DifficultyTile(app, d, lambda d=d: self.start(d)) for d in DIFFICULTIES]
         self.help_button = Button(app, "How to play", self.open_help, icon="book", font_size=15)
         self.settings_button = Button(app, "Settings", self.open_settings, icon="gear", font_size=15)
         self.quit_button = Button(app, "Quit", app.quit, icon="close", font_size=15)
         self.buttons = [self.help_button, self.settings_button, self.quit_button]
+        self.widgets: list[Widget] = [*self.chips, *self.tiles, *self.buttons]
         self.focus = FocusGroup()
         last = app.save.settings.last_difficulty
         keys = [d.key for d in DIFFICULTIES]
-        self.focus.set([*self.tiles, *self.buttons], keys.index(last) if last in keys else 0)
+        self.focus.set(self.widgets, len(self.chips) + (keys.index(last) if last in keys else 0))
         self.fan = CardFan(app, random.Random(app.rng.random()))
         self.modal: Modal | None = None
         self.resize(app.size)
 
     # -- actions ----------------------------------------------------------------
 
+    def set_players(self, count: int) -> None:
+        self.app.save.settings.players = count
+        self.app.save.save()
+
     def start(self, difficulty: Difficulty) -> None:
         from .game import GameScene
 
-        self.app.save.settings.last_difficulty = difficulty.key
+        settings = self.app.save.settings
+        settings.last_difficulty = difficulty.key
         self.app.save.save()
-        self.app.switch(lambda: GameScene(self.app, difficulty))
+        self.app.switch(lambda: GameScene(self.app, difficulty, settings.players))
 
     def open_help(self) -> None:
         self._open(HelpModal(self.app))
@@ -386,8 +399,8 @@ class MenuScene(Scene):
         w, h = size
         s = self.app.ui
         fonts = self.app.fonts
-        self.left = int(w * 0.075)
-        self.col_w = min(int(580 * s), int(w * 0.47))
+        self.left = int(w * 0.065)
+        self.col_w = min(int(640 * s), int(w * 0.5))
 
         self.over = gfx.text(
             fonts.get("medium", 13 * s), "A MEMORY GAME OF DRIFTING BLOSSOMS", Palette.INK_MUTED, tracking=4 * s
@@ -398,38 +411,63 @@ class MenuScene(Scene):
             title_px -= 4
             font = fonts.get("display", title_px)
         self.title = gfx.gradient_text(font, "Fever Dreams", TITLE_STOPS)
-        self.title_glow = gfx.glow(self.title, max(6, int(22 * s)), Palette.ROSE, strength=0.55)
+        self.title_glow = gfx.glow(self.title, max(6, int(20 * s)), (255, 255, 255), strength=1.6)
         tag_font = fonts.get("display_medium", 25 * s)
         self.tagline = [
             gfx.text(tag_font, line, Palette.INK_SOFT)
-            for line in ("Twenty-two dreamers wander the blossoms.", "Find each one’s twin before they drift away.")
+            for line in (
+                "Twenty-two dreamers wander the blossoms.",
+                "Find each one\u2019s twin before they drift away.",
+            )
         ]
-        self.section = gfx.text(fonts.get("medium", 12 * s), "CHOOSE YOUR DREAM", Palette.GOLD, tracking=4 * s)
+        self.section = gfx.text(fonts.get("medium", 12 * s), "CHOOSE YOUR DREAM", Palette.ACCENT, tracking=4 * s)
+        self.players_label = gfx.text(fonts.get("medium", 12 * s), "PLAYERS", Palette.INK_MUTED, tracking=3 * s)
 
+        gap = int(14 * s)
+        tile_h = int(112 * s)
+        chip_h = int(30 * s)
         block_h = (
             self.over.get_height()
             + self.title.get_height()
             + 2 * self.tagline[0].get_height()
-            + int(40 * s)
-            + self.section.get_height()
+            + int(36 * s)
+            + chip_h
             + int(14 * s)
-            + 2 * int(122 * s)
-            + int(16 * s)
-            + int(40 * s)
-            + int(48 * s)
+            + 2 * tile_h
+            + gap
+            + int(36 * s)
+            + int(46 * s)
         )
-        top = max(int(24 * s), (h - block_h) // 2)
+        top = max(int(20 * s), (h - block_h) // 2)
         self.over_y = top
         self.title_y = self.over_y + self.over.get_height() - int(title_px * 0.08)
         self.tag_y = self.title_y + self.title.get_height() - int(title_px * 0.12)
-        self.section_y = self.tag_y + 2 * self.tagline[0].get_height() + int(40 * s)
-        tiles_y = self.section_y + self.section.get_height() + int(14 * s)
-        gap = int(16 * s)
-        tile_w, tile_h = (self.col_w - gap) // 2, int(122 * s)
+        row_y = self.tag_y + 2 * self.tagline[0].get_height() + int(36 * s)
+        self.section_y = row_y + (chip_h - self.section.get_height()) // 2
+
+        # Player chips, right-aligned on the section row.
+        widths = [int(62 * s)] + [int(40 * s)] * (MAX_PLAYERS - 1)
+        cx = self.left + self.col_w - (sum(widths) + int(6 * s) * (len(widths) - 1))
+        self.players_label_pos = (
+            cx - self.players_label.get_width() - int(12 * s),
+            row_y + (chip_h - self.players_label.get_height()) // 2,
+        )
+        for chip, cw in zip(self.chips, widths):
+            chip.rect = pygame.Rect(cx, row_y, cw, chip_h)
+            cx += cw + int(6 * s)
+
+        # Difficulty tiles: three on top, two wider ones below.
+        tiles_y = row_y + chip_h + int(14 * s)
+        top_w = (self.col_w - 2 * gap) // 3
+        bottom_w = (self.col_w - gap) // 2
         for i, tile in enumerate(self.tiles):
-            r, c = divmod(i, 2)
-            tile.rect = pygame.Rect(self.left + c * (tile_w + gap), tiles_y + r * (tile_h + gap), tile_w, tile_h)
-        by = tiles_y + 2 * tile_h + gap + int(40 * s)
+            if i < 3:
+                tile.rect = pygame.Rect(self.left + i * (top_w + gap), tiles_y, top_w, tile_h)
+            else:
+                j = i - 3
+                tile.rect = pygame.Rect(self.left + j * (bottom_w + gap), tiles_y + tile_h + gap, bottom_w, tile_h)
+
+        by = tiles_y + 2 * tile_h + gap + int(36 * s)
         bx = self.left
         for button, bw in zip(self.buttons, (170, 140, 110)):
             button.rect = pygame.Rect(bx, by, int(bw * s), int(46 * s))
@@ -437,7 +475,7 @@ class MenuScene(Scene):
 
         right = self.left + self.col_w
         space = w - right
-        fan_h = min(h * 0.5, space * 0.78 / (CARD_ASPECT * 2.9))
+        fan_h = min(h * 0.5, space * 0.8 / (CARD_ASPECT * 2.7))
         self.fan.layout((int(right + space * 0.5), int(h * 0.48)), int(fan_h))
         self.show_fan = fan_h > 120 * s * 0.6
         if self.modal:
@@ -451,12 +489,12 @@ class MenuScene(Scene):
             return
         if event.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
             self.age = max(self.age, 1.6)  # any input fast-forwards the intro
-        for widget in (*self.tiles, *self.buttons):
+        for widget in self.widgets:
             if widget.handle_event(event):
                 self.focus.focus(widget)
                 return
         if event.type == pygame.KEYDOWN:
-            if pygame.K_1 <= event.key <= pygame.K_4:
+            if pygame.K_1 <= event.key < pygame.K_1 + len(DIFFICULTIES):
                 self.start(DIFFICULTIES[event.key - pygame.K_1])
                 return
             if event.key == pygame.K_h:
@@ -468,7 +506,7 @@ class MenuScene(Scene):
         self.age += dt
         interactive = self.modal is None and not self.app.transitioning
         mouse = pygame.mouse.get_pos() if interactive else (-1, -1)
-        for widget in (*self.tiles, *self.buttons):
+        for widget in self.widgets:
             widget.update(dt, mouse)
         self.fan.update(dt, pygame.mouse.get_pos())
         if self.modal:
@@ -486,7 +524,7 @@ class MenuScene(Scene):
         gfx.blit_alpha(surface, self.over, (self.left, self.over_y + (1 - a) * 16 * s), a)
         a = _reveal(age, 0.12, 1.0)
         ty = self.title_y + (1 - a) * 22 * s
-        pulse = 0.75 + 0.25 * math.sin(age * 1.4)
+        pulse = 0.8 + 0.2 * math.sin(age * 1.4)
         pad = (self.title_glow.get_width() - self.title.get_width()) // 2
         gfx.blit_alpha(surface, self.title_glow, (self.left - pad, ty - pad), a * pulse)
         gfx.blit_alpha(surface, self.title, (self.left, ty), a)
@@ -495,8 +533,11 @@ class MenuScene(Scene):
             gfx.blit_alpha(surface, line, (self.left, self.tag_y + i * line.get_height() + (1 - a) * 16 * s), a)
         a = _reveal(age, 0.4)
         gfx.blit_alpha(surface, self.section, (self.left, self.section_y + (1 - a) * 12 * s), a)
+        gfx.blit_alpha(surface, self.players_label, self.players_label_pos, a)
+        for chip in self.chips:
+            chip.draw(surface, a)
         for i, tile in enumerate(self.tiles):
-            a = _reveal(age, 0.45 + i * 0.07)
+            a = _reveal(age, 0.45 + i * 0.06)
             offset = int((1 - a) * 26 * s)
             tile.rect.y += offset
             tile.draw(surface, a)
@@ -507,7 +548,7 @@ class MenuScene(Scene):
 
         foot = gfx.text(
             self.app.fonts.get("regular", 12 * s),
-            "1–4 quick start  ·  F11 fullscreen  ·  F12 screenshot",
+            f"1\u2013{len(DIFFICULTIES)} quick start  \u00b7  F11 fullscreen  \u00b7  F12 screenshot",
             Palette.INK_FAINT,
         )
         w, h = self.app.size
@@ -515,10 +556,7 @@ class MenuScene(Scene):
             surface,
             foot,
             (w - foot.get_width() - int(24 * s), h - foot.get_height() - int(18 * s)),
-            _reveal(age, 1.0) * 0.8,
+            _reveal(age, 1.0) * 0.9,
         )
         if self.modal:
             self.modal.draw(surface)
-
-    def focus_lost(self) -> None:
-        pass

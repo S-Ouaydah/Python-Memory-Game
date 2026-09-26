@@ -110,6 +110,45 @@ def main() -> None:
     run(1.5)
     shot("fever")
 
+    app.switch(lambda: GameScene(app, DIFFICULTY_BY_KEY["delirium"]))
+    run(3.2)
+    scene = app.scene
+    p = pairs(scene)
+    for face in p[:8]:
+        scene.select(face[0])
+        run(0.1)
+        scene.select(face[1])
+        run(0.45)
+    scene.select(p[9][0])
+    run(1.0)
+    shot("delirium")
+
+    # Hot-seat: three players on Reverie.
+    app.save.settings.players = 3
+    app.switch(lambda: MenuScene(app, intro=False))
+    run(1.2)
+    shot("menu-players")
+    app.switch(lambda: GameScene(app, DIFFICULTY_BY_KEY["reverie"], 3))
+    run(3.0)
+    scene = app.scene
+    p = pairs(scene)
+    # (first pair, second pair): equal means a match, otherwise a miss.
+    for a, b in [(0, 0), (1, 2), (3, 3), (4, 4), (5, 6), (7, 7)]:
+        scene.select(p[a][0])
+        run(0.35)
+        scene.select(p[b][1] if a == b else p[b][0])
+        run(0.9 if a == b else 1.7)
+    shot("multiplayer")
+    for face in p:
+        if scene.game.cards[face[0]].state is not CardState.MATCHED:
+            scene.select(face[1])
+            run(0.1)
+            scene.select(face[0])
+            run(0.45)
+    run(3.4)
+    shot("multiplayer-results")
+    app.save.settings.players = 1
+
     app.switch(lambda: MenuScene(app, intro=False))
     run(1.0)
     app.scene.open_help()

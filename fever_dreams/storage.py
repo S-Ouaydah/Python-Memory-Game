@@ -34,6 +34,8 @@ class Settings:
     #: Drifting petals and motes in the background.
     ambient: bool = True
     last_difficulty: str = "serene"
+    #: 1 for solo play, 2-4 for hot-seat turns.
+    players: int = 1
 
 
 @dataclass
@@ -96,6 +98,8 @@ class SaveData:
         if not isinstance(raw, dict):
             return save
         save.settings = _from_dict(Settings, raw.get("settings"))
+        if not 1 <= save.settings.players <= 4:
+            save.settings.players = 1
         records = raw.get("records")
         if isinstance(records, dict):
             save.records = {str(k): _from_dict(Record, v) for k, v in records.items()}

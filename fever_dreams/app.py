@@ -257,6 +257,8 @@ class App:
         x = (self.size[0] - w) // 2
         y = self.size[1] - h - int(28 * s)
         alpha = min(1.0, self._toast_age * 6, (3.0 - self._toast_age) * 2)
-        pill = gfx.rounded_rect((w, h), h // 2, (40, 24, 66, 235), 1, (*Palette.GOLD_LIGHT, 120))
+        shadow = gfx.soft_shadow((w, h), h // 2, max(4, int(10 * s)), 70, Palette.SHADOW)
+        gfx.blit_center(screen, shadow, (x + w / 2, y + h / 2 + 4 * s), alpha)
+        pill = gfx.rounded_rect((w, h), h // 2, (255, 255, 255, 236), 1, (*Palette.ROSE, 200))
         gfx.blit_alpha(screen, pill, (x, y), alpha)
         gfx.blit_center(screen, label, (x + w / 2, y + h / 2), alpha)

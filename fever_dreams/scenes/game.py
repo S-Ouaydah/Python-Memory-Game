@@ -28,8 +28,8 @@ from ..layout import compute_grid
 from ..logic import GLIMPSE_COST, CardState, FinalScore, MemoryGame, Outcome, streak_multiplier
 from ..particles import Effects
 from ..storage import NewBests
-from ..tween import approach, ease_out_back, ease_out_cubic
-from ..widgets import GOLD_STOPS, Button, draw_panel, nearest_in_direction
+from ..tween import approach, bump, ease_out_back, ease_out_cubic, lerp_color
+from ..widgets import HONEY_STOPS, Button, draw_panel, nearest_in_direction
 from .base import Modal, Scene
 
 if TYPE_CHECKING:
@@ -62,9 +62,11 @@ class Phase(Enum):
 
 
 class GameScene(Scene):
-    def __init__(self, app: App, difficulty: Difficulty) -> None:
+    def __init__(self, app: App, difficulty: Difficulty, players: int = 1) -> None:
         super().__init__(app)
         self.difficulty = difficulty
+        self.players = players
+        self.multiplayer = players > 1
         self.effects = Effects()
         self.top_effects = Effects()  # drawn above dialogs
         self.pause_button = Button(app, "", self.pause, icon="pause")
@@ -74,8 +76,14 @@ class GameScene(Scene):
         self.modal: Modal | None = None
 
         rng = app.rng
-        faces = rng.sample(range(app.art.count), difficulty.pairs)
-        self.game = MemoryGame(faces, rng=random.Random(rng.random()))
+        faces = rng.sample(range(app.art.face_pool(difficulty.pairs)), difficulty.pairs)
+        self.game = MemoryGame(
+            faces, rng=random.Random(rng.random()), glimpses=0 if self.multiplayer else 1, players=players
+        )
+        self.glimpse_button.visible = not self.multiplayer
+        self.turn_glow = [1.0 if i == 0 else 0.0 for i in range(players)]
+        self.banner_player: int | None = None
+        self.banner_age = 0.0
         self.sprites = [CardSprite(i, card.face, app.art) for i, card in enumerate(self.game.cards)]
         self.phase = Phase.DEALING
         self.elapsed = 0.0
@@ -105,7 +113,12 @@ class GameScene(Scene):
         for i, sprite in enumerate(self.sprites):
             sprite.deal(origin, 0.15 + i * stagger)
         self.app.audio.play("deal", 0.8)
-        if not any(r.wins for r in self.app.save.records.values()):
+        if self.multiplayer:
+            self.later(0.2 + len(self.sprites) * stagger + 0.5, lambda: self.show_turn(0))
+            if not getattr(self.app, "hotseat_hint_shown", False):
+                self.app.hotseat_hint_shown = True
+                self.app.toast("Take turns: a match earns another go, a miss passes the turn")
+        elif not any(r.wins for r in self.app.save.records.values()):
             self.app.toast("Turn over two cards at a time to find each dreamer\u2019s twin")
 
     def focus_lost(self) -> None:
@@ -150,12 +163,12 @@ class GameScene(Scene):
         self.modal = modal
 
     def restart(self) -> None:
-        self.app.switch(lambda: GameScene(self.app, self.difficulty))
+        self.app.switch(lambda: GameScene(self.app, self.difficulty, self.players))
 
     def play(self, difficulty: Difficulty) -> None:
         self.app.save.settings.last_difficulty = difficulty.key
         self.app.save.save()
-        self.app.switch(lambda: GameScene(self.app, difficulty))
+        self.app.switch(lambda: GameScene(self.app, difficulty, self.players))
 
     def to_menu(self) -> None:
         from .menu import MenuScene
@@ -184,7 +197,7 @@ class GameScene(Scene):
         self.glimpse_button.badge = None
         self.app.audio.play("glimpse")
         self.effects.text(
-            self._popup(f"−{GLIMPSE_COST}", Palette.ROSE),
+            self._popup(f"−{GLIMPSE_COST}", Palette.DANGER),
             self.hud.centerx,
             self.hud.bottom + 30 * self.app.ui,
             life=1.2,
@@ -212,20 +225,37 @@ class GameScene(Scene):
         elif result.outcome is Outcome.MISMATCH:
             self.mismatch_timer = MISMATCH_DELAY
             self.later(FLIP_DURATION * 0.9, lambda r=result: self._on_mismatch(r))
+            if self.multiplayer:
+                self.later(FLIP_DURATION * 1.2, lambda p=result.next_player: self.show_turn(p))
+
+    def player_color(self, player: int) -> tuple[int, int, int]:
+        return Palette.PLAYERS[player % len(Palette.PLAYERS)]
+
+    def show_turn(self, player: int) -> None:
+        if self.phase in (Phase.CELEBRATING, Phase.RESULTS):
+            return
+        self.banner_player = player
+        self.banner_age = 0.0
 
     def _on_match(self, result) -> None:
         s = self.app.ui
         a, b = self.sprites[result.index], self.sprites[result.partner]
+        color = self.player_color(result.player) if self.multiplayer else Palette.GOLD
+        colors = (color, Palette.GOLD, Palette.ROSE_DEEP) if self.multiplayer else None
         for sprite in (a, b):
-            sprite.mark_matched()
+            sprite.mark_matched(color)
             cx, cy = sprite.rect.center
-            self.effects.sparkles(cx, cy, count=14 + 2 * min(result.streak, 6), speed=260 * s, scale=s)
-            self.effects.ring(cx, cy, sprite.rect.h * 0.75)
+            if colors:
+                self.effects.sparkles(cx, cy, 14 + 2 * min(result.streak, 6), 260 * s, colors=colors, scale=s)
+            else:
+                self.effects.sparkles(cx, cy, 14 + 2 * min(result.streak, 6), 260 * s, scale=s)
+            self.effects.ring(cx, cy, sprite.rect.h * 0.75, color)
         self.app.audio.play_match(result.streak)
         self.app.background.flash = min(1.0, 0.35 + 0.12 * result.streak)
         mx = (a.rect.centerx + b.rect.centerx) / 2
         my = min(a.rect.top, b.rect.top) + a.rect.h * 0.35
-        self.effects.text(self._popup(f"+{result.points}", Palette.GOLD_LIGHT), mx, my, rise=56 * s)
+        popup_color = color if self.multiplayer else Palette.GOLD_DEEP
+        self.effects.text(self._popup(f"+{result.points}", popup_color), mx, my, rise=56 * s)
         if result.streak >= 2:
             self.combo_age = 0.0
         if result.finished:
@@ -242,13 +272,15 @@ class GameScene(Scene):
         self.phase = Phase.CELEBRATING
         self.clock_running = False
         self.celebrate_timer = WIN_CELEBRATION
+        self.banner_player = None
         self.final = self.game.final_score(self.elapsed, self.difficulty.par_time)
-        save = self.app.save
-        self.new_bests = save.register_win(
-            self.difficulty.key, self.final.total, self.elapsed, self.game.moves, self.final.stars
-        )
-        self.first_clear = save.record(self.difficulty.key).wins == 1
-        save.save()
+        if not self.multiplayer:  # records are for solo play
+            save = self.app.save
+            self.new_bests = save.register_win(
+                self.difficulty.key, self.final.total, self.elapsed, self.game.moves, self.final.stars
+            )
+            self.first_clear = save.record(self.difficulty.key).wins == 1
+            save.save()
         w, h = self.app.size
         cx, cy = w / 2, h / 2
         for sprite in self.sprites:
@@ -262,9 +294,9 @@ class GameScene(Scene):
     def _popup(self, label: str, color) -> pygame.Surface:
         s = self.app.ui
         text = gfx.text(self.app.fonts.get("semibold", 32 * s), label, color)
-        # A dark halo keeps the number readable over pale card art.
+        # A white halo keeps the number readable over busy card art.
         dark_r, glow_r = max(4, int(9 * s)), max(2, int(4 * s))
-        out = gfx.glow(text, dark_r, (22, 8, 34), strength=2.6)
+        out = gfx.glow(text, dark_r, (255, 255, 255), strength=3.0)
         pad = 2 * dark_r
         out.blit(gfx.glow(text, glow_r, color, strength=0.6), (pad - 2 * glow_r, pad - 2 * glow_r))
         out.blit(text, (pad, pad))
@@ -347,6 +379,9 @@ class GameScene(Scene):
         self.display_score = approach(self.display_score, self.game.score, 9, dt)
         self.progress = approach(self.progress, self.game.matches / self.game.pairs, 6, dt)
         self.combo_age += dt
+        self.banner_age += dt
+        for i in range(self.players):
+            self.turn_glow[i] = approach(self.turn_glow[i], 1.0 if i == self.game.current else 0.0, 10, dt)
         self.combo_shown = approach(self.combo_shown, 1.0 if self.game.streak >= 2 else 0.0, 10, dt)
         self.glimpse_button.enabled = self.game.glimpses_left > 0 and self.phase is Phase.PLAYING
         self.glimpse_button.badge = str(self.game.glimpses_left) if self.game.glimpses_left else None
@@ -401,6 +436,7 @@ class GameScene(Scene):
         for sprite in sorted(self.sprites, key=elevation):
             sprite.draw(surface)
         self.effects.draw(surface)
+        self._draw_banner(surface)
         self._draw_hud(surface)
         self._draw_combo(surface)
         self._draw_footer(surface)
@@ -423,16 +459,34 @@ class GameScene(Scene):
         name = gfx.text(fonts.get("display", 30 * s), self.difficulty.name, Palette.INK)
         gfx.blit_alpha(surface, name, (nx, hud.y + int(10 * s)), intro)
         record = self.app.save.record(self.difficulty.key)
-        sub = f"Best {record.best_score:,}" if record.best_score is not None else self.difficulty.tagline
+        if self.multiplayer:
+            sub = f"{gfx.format_time(self.elapsed)}  \u00b7  {self.game.moves} moves"
+        elif record.best_score is not None:
+            sub = f"Best {record.best_score:,}"
+        else:
+            sub = self.difficulty.tagline
         sub_surf = gfx.text(fonts.get("regular", 13 * s), sub, Palette.INK_MUTED)
         gfx.blit_alpha(surface, sub_surf, (nx, hud.y + int(10 * s) + name.get_height() - int(6 * s)), intro)
 
-        # Stats, centred.
+        if self.multiplayer:
+            self._draw_players(surface, hud, intro)
+        else:
+            self._draw_stats(surface, hud, intro)
+        self._draw_rail(surface, hud, radius, intro)
+
+        for button in self.hud_buttons:
+            button.rect.y += offset
+            button.draw(surface, intro)
+            button.rect.y -= offset
+
+    def _draw_stats(self, surface: pygame.Surface, hud: pygame.Rect, intro: float) -> None:
+        s = self.app.ui
+        fonts = self.app.fonts
         stats = (
             ("TIME", gfx.format_time(self.elapsed), Palette.INK),
             ("MOVES", str(self.game.moves), Palette.INK),
             ("PAIRS", f"{self.game.matches}/{self.game.pairs}", Palette.INK),
-            ("SCORE", f"{int(round(self.display_score)):,}", Palette.GOLD_LIGHT),
+            ("SCORE", f"{int(round(self.display_score)):,}", Palette.ACCENT),
         )
         block = int(118 * s)
         left = hud.centerx - block * len(stats) // 2
@@ -445,27 +499,83 @@ class GameScene(Scene):
             gfx.blit_alpha(surface, lab, (cx - lab.get_width() // 2, hud.y + int(15 * s)), intro)
             gfx.blit_alpha(surface, val, (cx - val.get_width() // 2, hud.y + int(29 * s)), intro)
             if i:
-                sep = gfx.rounded_rect((max(1, int(s)), int(34 * s)), 0, (255, 255, 255, 26))
+                sep = gfx.rounded_rect((max(1, int(s)), int(34 * s)), 0, Palette.LINE)
                 gfx.blit_alpha(surface, sep, (left + block * i, hud.y + int(22 * s)), intro)
 
-        # Progress rail along the bottom edge.
+    def _draw_players(self, surface: pygame.Surface, hud: pygame.Rect, intro: float) -> None:
+        """One chip per player; the one whose turn it is lights up in their colour."""
+        s = self.app.ui
+        fonts = self.app.fonts
+        cw, ch, gap = int(138 * s), int(52 * s), int(10 * s)
+        total = self.players * cw + (self.players - 1) * gap
+        x = hud.centerx - total // 2
+        y = hud.centery - ch // 2 - int(2 * s)
+        radius = int(16 * s)
+        for i in range(self.players):
+            color = self.player_color(i)
+            glow = self.turn_glow[i]
+            rect = pygame.Rect(x + i * (cw + gap), y, cw, ch)
+            halo = gfx.soft_shadow((cw, ch), radius, max(4, int(10 * s)), 160, color)
+            gfx.blit_center(surface, halo, rect.center, intro * glow * 0.8)
+            base = gfx.rounded_rect((cw, ch), radius, Palette.GLASS, 1, Palette.LINE)
+            lit = gfx.rounded_rect(
+                (cw, ch), radius, lerp_color(color, (255, 255, 255), 0.72) + (255,), max(2, int(2 * s)), color
+            )
+            gfx.blit_alpha(surface, base, rect.topleft, intro)
+            gfx.blit_alpha(surface, lit, rect.topleft, intro * glow)
+            dot = gfx.circle(int(12 * s), color)
+            gfx.blit_center(surface, dot, (rect.x + 20 * s, rect.centery), intro)
+            name = gfx.text(fonts.get("medium", 12 * s), f"Player {i + 1}", Palette.INK_MUTED)
+            pairs = self.game.player_pairs[i]
+            value = gfx.text(fonts.get("semibold", 19 * s), f"{pairs} pair{'s' if pairs != 1 else ''}", Palette.INK)
+            tx = rect.x + int(34 * s)
+            block = name.get_height() + value.get_height() - int(4 * s)
+            ty = rect.centery - block // 2
+            gfx.blit_alpha(surface, name, (tx, ty), intro)
+            gfx.blit_alpha(surface, value, (tx, ty + name.get_height() - int(4 * s)), intro)
+
+    def _draw_rail(self, surface: pygame.Surface, hud: pygame.Rect, radius: int, intro: float) -> None:
+        s = self.app.ui
         rail_w = hud.w - 2 * radius
         rail_h = max(2, int(3 * s))
         rx, ry = hud.x + radius, hud.bottom - rail_h - int(6 * s)
-        gfx.blit_alpha(surface, gfx.rounded_rect((rail_w, rail_h), rail_h // 2, (255, 255, 255, 20)), (rx, ry), intro)
+        gfx.blit_alpha(surface, gfx.rounded_rect((rail_w, rail_h), rail_h // 2, Palette.LINE), (rx, ry), intro)
         fill = int(rail_w * self.progress)
         if fill > rail_h:
             bar = gfx.rounded_gradient(
-                (fill, rail_h), rail_h // 2, ((0.0, Palette.ROSE), (1.0, Palette.GOLD_LIGHT)), vertical=False
+                (fill, rail_h), rail_h // 2, ((0.0, Palette.ROSE), (1.0, Palette.LAVENDER_DEEP)), vertical=False
             )
             gfx.blit_alpha(surface, bar, (rx, ry), intro)
-            tip = gfx.soft_shadow((rail_h * 3, rail_h * 3), rail_h, max(2, int(4 * s)), 220, Palette.GOLD_LIGHT)
+            tip = gfx.soft_shadow((rail_h * 3, rail_h * 3), rail_h, max(2, int(4 * s)), 220, Palette.LAVENDER_DEEP)
             gfx.blit_center(surface, tip, (rx + fill, ry + rail_h / 2), intro * 0.9)
 
-        for button in self.hud_buttons:
-            button.rect.y += offset
-            button.draw(surface, intro)
-            button.rect.y -= offset
+    def _draw_banner(self, surface: pygame.Surface) -> None:
+        """'Player N' announcement when the turn passes."""
+        if self.banner_player is None or self.banner_age > 1.5:
+            return
+        t = self.banner_age
+        alpha = min(1.0, t / 0.18, max(0.0, (1.5 - t) / 0.35))
+        pop = 0.85 + 0.15 * ease_out_back(t / 0.35, 2.0)
+        s = self.app.ui * pop
+        fonts = self.app.fonts
+        color = self.player_color(self.banner_player)
+        name = gfx.text(fonts.get("display", 38 * s), f"Player {self.banner_player + 1}", color)
+        sub = gfx.text(fonts.get("medium", 15 * s), "your turn", Palette.INK_MUTED)
+        w = name.get_width() + sub.get_width() + int(84 * s)
+        h = int(70 * s)
+        cx = self.app.size[0] / 2
+        board_top, board_bottom = self.sprites[0].rect.top, max(sp.rect.bottom for sp in self.sprites)
+        cy = (board_top + board_bottom) / 2
+        glow = gfx.soft_shadow((w, h), h // 2, max(6, int(18 * s)), 170, color)
+        gfx.blit_center(surface, glow, (cx, cy + 4 * s), alpha)
+        pill = gfx.rounded_rect((w, h), h // 2, (255, 255, 255, 240), max(2, int(2 * s)), color)
+        gfx.blit_center(surface, pill, (cx, cy), alpha)
+        x = cx - w / 2 + int(28 * s)
+        gfx.blit_center(surface, gfx.circle(int(16 * s), color), (x + 8 * s, cy), alpha)
+        x += int(26 * s)
+        gfx.blit_alpha(surface, name, (x, cy - name.get_height() / 2 - 2 * s), alpha)
+        x += name.get_width() + int(12 * s)
+        gfx.blit_alpha(surface, sub, (x, cy - sub.get_height() / 2 + 3 * s), alpha * (0.4 + 0.6 * bump(min(1, t))))
 
     def _draw_combo(self, surface: pygame.Surface) -> None:
         if self.combo_shown < 0.02 or self.game.streak < 2 and self.combo_shown < 0.02:
@@ -477,9 +587,9 @@ class GameScene(Scene):
         pop = 1 + 0.22 * math.exp(-self.combo_age * 7) * math.cos(self.combo_age * 14)
         w, h = int((text.get_width() + 30 * s) * pop), int(32 * s * pop)
         cx, cy = self.hud.centerx, self.hud.bottom + int(2 * s)
-        glow = gfx.soft_shadow((w, h), h // 2, max(4, int(12 * s)), 200, Palette.GOLD)
+        glow = gfx.soft_shadow((w, h), h // 2, max(4, int(12 * s)), 170, Palette.GOLD)
         gfx.blit_center(surface, glow, (cx, cy), self.combo_shown * 0.8)
-        pill = gfx.rounded_gradient((w, h), h // 2, GOLD_STOPS)
+        pill = gfx.rounded_gradient((w, h), h // 2, HONEY_STOPS)
         gfx.blit_center(surface, pill, (cx, cy), self.combo_shown)
         if pop != 1:
             text = pygame.transform.smoothscale(text, (int(text.get_width() * pop), int(text.get_height() * pop)))
@@ -488,11 +598,12 @@ class GameScene(Scene):
     def _draw_footer(self, surface: pygame.Surface) -> None:
         s = self.app.ui
         w, h = self.app.size
-        hint = (
-            "Esc pause  ·  G glimpse  ·  R restart  ·  arrows + Space to play by keyboard"
-            if self.phase is not Phase.DEALING
-            else "Click to skip the deal"
-        )
+        if self.phase is Phase.DEALING:
+            hint = "Click to skip the deal"
+        elif self.multiplayer:
+            hint = "Esc pause  \u00b7  R restart  \u00b7  arrows + Space to play by keyboard"
+        else:
+            hint = "Esc pause  \u00b7  G glimpse  \u00b7  R restart  \u00b7  arrows + Space to play by keyboard"
         text = gfx.text(self.app.fonts.get("regular", 12 * s), hint, Palette.INK_FAINT)
         gfx.blit_center(surface, text, (w / 2, h - self.footer_h / 2 - 4 * s), 0.85 * ease_out_cubic(self.age - 0.4))
 
@@ -539,11 +650,15 @@ class PauseModal(Modal):
         s = self.app.ui
         fonts = self.app.fonts
         game = self.scene.game
-        over = gfx.text(fonts.get("medium", 12 * s), "PAUSED", Palette.GOLD, tracking=4 * s)
+        over = gfx.text(fonts.get("medium", 12 * s), "PAUSED", Palette.ACCENT, tracking=4 * s)
         gfx.blit_center(surface, over, (panel.centerx, panel.y + 44 * s), alpha)
         title = gfx.text(fonts.get("display", 46 * s), "Take a breath", Palette.INK)
         gfx.blit_center(surface, title, (panel.centerx, panel.y + 88 * s), alpha)
-        info = f"{gfx.format_time(self.scene.elapsed)}  ·  {game.moves} moves  ·  {game.matches} of {game.pairs} pairs"
+        if self.scene.multiplayer:
+            info = f"Player {game.current + 1}\u2019s turn  \u00b7  {game.matches} of {game.pairs} pairs found"
+        else:
+            clock = gfx.format_time(self.scene.elapsed)
+            info = f"{clock}  \u00b7  {game.moves} moves  \u00b7  {game.matches} of {game.pairs} pairs"
         text = gfx.text(fonts.get("regular", 14 * s), info, Palette.INK_MUTED)
         gfx.blit_center(surface, text, (panel.centerx, panel.y + 130 * s), alpha)
 
@@ -560,7 +675,8 @@ class ResultsModal(Modal):
         self.stars_played = 0
         app = scene.app
         nxt = next_difficulty(scene.difficulty.key)
-        self.again = Button(app, "Play again", scene.restart, style="primary", icon="restart")
+        label = "Rematch" if scene.multiplayer else "Play again"
+        self.again = Button(app, label, scene.restart, style="primary", icon="restart")
         self.next = Button(app, f"Next: {nxt.name}", lambda: scene.play(nxt), icon="arrow_right") if nxt else None
         self.menu = Button(app, "Menu", scene.to_menu, icon="home")
         widgets = [self.again, *([self.next] if self.next else []), self.menu]
@@ -581,7 +697,11 @@ class ResultsModal(Modal):
 
     def layout(self, size: tuple[int, int]) -> None:
         s = self.app.ui
-        w, h = int(640 * s), int(610 * s)
+        w = int(640 * s)
+        if self.scene.multiplayer:  # standings rows plus title and buttons
+            h = int((176 + self.scene.players * 68 + 30 + 50 + 34) * s)
+        else:
+            h = int(610 * s)
         self.panel = pygame.Rect((size[0] - w) // 2, (size[1] - h) // 2, w, h)
         bh = int(50 * s)
         gap = int(12 * s)
@@ -597,7 +717,7 @@ class ResultsModal(Modal):
         super().update(dt)
         self.age += dt
         s = self.app.ui
-        while self.stars_played < 3 and self.age >= self._star_time(self.stars_played):
+        while not self.scene.multiplayer and self.stars_played < 3 and self.age >= self._star_time(self.stars_played):
             i = self.stars_played
             self.stars_played += 1
             if i < self.final.stars:
@@ -621,10 +741,15 @@ class ResultsModal(Modal):
         game = scene.game
         final = self.final
 
-        over = gfx.text(fonts.get("medium", 12 * s), "DREAM COMPLETE", Palette.GOLD, tracking=4 * s)
+        over = gfx.text(fonts.get("medium", 12 * s), "DREAM COMPLETE", Palette.ACCENT, tracking=4 * s)
         gfx.blit_center(surface, over, (panel.centerx, panel.y + 40 * s), alpha)
+        if scene.multiplayer:
+            self._draw_standings(surface, panel, alpha)
+            return
         title = gfx.gradient_text(
-            fonts.get("display", 62 * s), scene.difficulty.name, ((0.0, Palette.GOLD_LIGHT), (1.0, Palette.ROSE))
+            fonts.get("display", 62 * s),
+            scene.difficulty.name,
+            ((0.0, Palette.ROSE_DEEP), (1.0, Palette.LAVENDER_DEEP)),
         )
         gfx.blit_center(surface, title, (panel.centerx, panel.y + 90 * s), alpha)
         if scene.first_clear:
@@ -636,7 +761,7 @@ class ResultsModal(Modal):
             size = int((64 if i == 1 else 52) * s)
             t = (self.age - self._star_time(i)) / 0.45
             earned = i < final.stars
-            outline = gfx.icon("star", size, (255, 255, 255, 36))
+            outline = gfx.icon("star", size, Palette.LINE)
             gfx.blit_center(surface, outline, (cx, cy), alpha)
             if earned and t > 0:
                 k = ease_out_back(t, 2.2)
@@ -683,16 +808,77 @@ class ResultsModal(Modal):
         grid_w = panel.w - int(80 * s)
         cell = grid_w / len(stats)
         top = panel.y + int(364 * s)
-        box = gfx.rounded_rect((grid_w, int(96 * s)), int(18 * s), (255, 255, 255, 12), 1, (255, 255, 255, 26))
+        box = gfx.rounded_rect((grid_w, int(96 * s)), int(18 * s), Palette.GLASS, 1, Palette.GLASS_EDGE)
         gfx.blit_alpha(surface, box, (panel.x + int(40 * s), top), alpha)
         for i, (label, value, best) in enumerate(stats):
             cx = panel.x + int(40 * s) + cell * i + cell / 2
             lab = gfx.text(fonts.get("medium", 11 * s), label, Palette.INK_FAINT, tracking=2.5 * s)
-            val = gfx.text(fonts.get("semibold", 26 * s), value, Palette.GOLD_LIGHT if best else Palette.INK)
+            val = gfx.text(fonts.get("semibold", 26 * s), value, Palette.GOLD_DEEP if best else Palette.INK)
             gfx.blit_center(surface, lab, (cx, top + 26 * s), alpha)
             gfx.blit_center(surface, val, (cx, top + 56 * s), alpha)
             if best:
                 self._pill(surface, "BEST", (cx, top + 84 * s), alpha, Palette.GOLD, small=True)
+
+    def _draw_standings(self, surface, panel, alpha) -> None:
+        """Multiplayer results: the winner (or a tie) and everyone's pairs."""
+        s = self.app.ui
+        fonts = self.app.fonts
+        scene = self.scene
+        game = scene.game
+        leaders = game.leaders
+        if len(leaders) == 1:
+            color = scene.player_color(leaders[0])
+            headline = f"Player {leaders[0] + 1} wins!"
+            stops = ((0.0, color), (1.0, lerp_color(color, Palette.LAVENDER_DEEP, 0.5)))
+        else:
+            headline = "It\u2019s a tie!"
+            stops = ((0.0, Palette.ROSE_DEEP), (1.0, Palette.LAVENDER_DEEP))
+        title = gfx.gradient_text(fonts.get("display", 58 * s), headline, stops)
+        gfx.blit_center(surface, title, (panel.centerx, panel.y + 94 * s), alpha)
+        sub = (
+            f"{scene.difficulty.name}  \u00b7  {gfx.format_time(scene.elapsed)}  \u00b7  {game.moves} moves"
+            if len(leaders) == 1
+            else " and ".join(f"Player {i + 1}" for i in leaders) + " share the dream"
+        )
+        text = gfx.text(fonts.get("regular", 14 * s), sub, Palette.INK_MUTED)
+        gfx.blit_center(surface, text, (panel.centerx, panel.y + 140 * s), alpha)
+
+        order = sorted(range(game.players), key=lambda i: (-game.player_pairs[i], -game.player_points[i], i))
+        row_w, row_h, gap = panel.w - int(96 * s), int(58 * s), int(10 * s)
+        x = panel.x + (panel.w - row_w) // 2
+        y = panel.y + int(176 * s)
+        best = game.player_pairs[order[0]]
+        for rank, i in enumerate(order):
+            t = ease_out_cubic((self.age - 0.35 - rank * 0.12) / 0.5)
+            if t <= 0:
+                continue
+            color = scene.player_color(i)
+            winner = game.player_pairs[i] == best
+            ry = y + rank * (row_h + gap) + int((1 - t) * 16 * s)
+            fill = lerp_color(color, (255, 255, 255), 0.78) + (255,) if winner else Palette.GLASS
+            row = gfx.rounded_rect(
+                (row_w, row_h),
+                int(18 * s),
+                fill,
+                max(1, int(2 * s)) if winner else 1,
+                color if winner else Palette.GLASS_EDGE,
+            )
+            gfx.blit_alpha(surface, row, (x, ry), alpha * t)
+            cy = ry + row_h / 2
+            rank_text = gfx.text(fonts.get("semibold", 18 * s), str(rank + 1), Palette.INK_FAINT)
+            gfx.blit_center(surface, rank_text, (x + 26 * s, cy), alpha * t)
+            gfx.blit_center(surface, gfx.circle(int(16 * s), color), (x + 56 * s, cy), alpha * t)
+            name = gfx.text(fonts.get("semibold", 19 * s), f"Player {i + 1}", Palette.INK)
+            gfx.blit_alpha(surface, name, (x + int(74 * s), cy - name.get_height() / 2), alpha * t)
+            if winner:
+                trophy = gfx.icon("trophy", int(20 * s), Palette.GOLD_DEEP)
+                gfx.blit_center(surface, trophy, (x + int(84 * s) + name.get_width() + 12 * s, cy), alpha * t)
+            pairs = game.player_pairs[i]
+            value = gfx.text(fonts.get("semibold", 22 * s), f"{pairs} pair{'s' if pairs != 1 else ''}", color)
+            points = gfx.text(fonts.get("regular", 13 * s), f"{game.player_points[i]:,} pts", Palette.INK_MUTED)
+            vx = x + row_w - int(22 * s)
+            gfx.blit_alpha(surface, value, (vx - value.get_width(), cy - value.get_height() / 2 - 7 * s), alpha * t)
+            gfx.blit_alpha(surface, points, (vx - points.get_width(), cy + 8 * s), alpha * t)
 
     def _pill(self, surface, label, center, alpha, color, small=False) -> None:
         s = self.app.ui

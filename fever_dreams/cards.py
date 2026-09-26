@@ -34,6 +34,7 @@ class CardSprite:
         self.hover = 0.0
         self.focus = 0.0
         self.matched = False
+        self.match_color = Palette.GOLD
         self.dim = 0.0
         # Seconds since each effect started (negative while delayed); None = inactive.
         self.match_age: float | None = None
@@ -48,8 +49,9 @@ class CardSprite:
         self.face_up = face_up
         self.flip_speed = speed
 
-    def mark_matched(self) -> None:
+    def mark_matched(self, color=Palette.GOLD) -> None:
         self.matched = True
+        self.match_color = tuple(color)
         self.match_age = 0.0
 
     def shake(self) -> None:
@@ -138,11 +140,11 @@ class CardSprite:
         # Halos behind the card.
         if self.matched:
             glow = 0.22 + 0.78 * math.exp(-(self.match_age or 0.0) * 2.2)
-            self._halo(surface, Palette.GOLD, (cw, ch), (cx, cy), alpha * glow)
+            self._halo(surface, self.match_color, (cw, ch), (cx, cy), alpha * glow)
         elif self.hover > 0.02 and not self.face_up:
             self._halo(surface, Palette.LAVENDER, (cw, ch), (cx, cy), alpha * self.hover)
         elif self.face_up and not self.turning:
-            self._halo(surface, (255, 236, 250), (cw, ch), (cx, cy), alpha * 0.35)
+            self._halo(surface, Palette.LAVENDER, (cw, ch), (cx, cy), alpha * 0.6)
         if self.shake_age is not None:
             fade = 1 - self.shake_age / SHAKE_TIME
             self._halo(surface, Palette.DANGER, (cw, ch), (cx, cy), alpha * fade * 0.9)
@@ -160,18 +162,18 @@ class CardSprite:
 
         radius = card_radius(w)
         if self.hover > 0.02 and not self.face_up:
-            rim = gfx.rounded_outline((w, h), radius, (236, 226, 255), max(1.5, w / 80))
+            rim = gfx.rounded_outline((w, h), radius, Palette.LAVENDER_DEEP, max(1.5, w / 80))
             gfx.blit_alpha(surface, _fit(rim, (cw, ch)), (left, top), alpha * self.hover * 0.9)
         if self.matched and front:
             if self.dim > 0.01:
-                veil = _fit(gfx.rounded_rect((w, h), radius, (14, 6, 26, 90)), (cw, ch))
+                veil = _fit(gfx.rounded_rect((w, h), radius, (255, 255, 255, 70)), (cw, ch))
                 gfx.blit_alpha(surface, veil, (left, top), alpha * self.dim)
-            frame = gfx.rounded_outline((w, h), radius, Palette.GOLD_LIGHT, max(1.5, w / 70))
+            frame = gfx.rounded_outline((w, h), radius, self.match_color, max(2.0, w / 55))
             gfx.blit_alpha(surface, _fit(frame, (cw, ch)), (left, top), alpha)
 
         if self.focus > 0.02:
             pad = max(4, int(w * 0.05))
-            ring = gfx.rounded_outline((w + pad * 2, h + pad * 2), radius + pad, Palette.SKY, max(2, w / 55))
+            ring = gfx.rounded_outline((w + pad * 2, h + pad * 2), radius + pad, Palette.FOCUS, max(2, w / 55))
             ring = _fit(ring, (max(1, int(full[0] + pad * 2 * scale)), int(ch + pad * 2 * scale)))
             gfx.blit_center(surface, ring, (cx, cy), alpha * self.focus)
 

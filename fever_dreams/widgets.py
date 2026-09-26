@@ -14,7 +14,8 @@ from .tween import approach, lerp_color
 if TYPE_CHECKING:
     from .app import App
 
-GOLD_STOPS = ((0.0, Palette.GOLD_LIGHT), (0.55, Palette.GOLD), (1.0, Palette.GOLD_DEEP))
+PRIMARY_STOPS = Palette.PRIMARY
+HONEY_STOPS = Palette.HONEY
 
 
 def nearest_in_direction(centers: Sequence[tuple[float, float]], current: int, dx: int, dy: int) -> int:
@@ -52,12 +53,12 @@ def draw_panel(surface: pygame.Surface, rect: pygame.Rect, radius: int, alpha: f
     """A frosted-glass panel with a soft shadow."""
     size = (rect.w, rect.h)
     blur = max(8, int(28 * scale))
-    shadow = gfx.soft_shadow(size, radius, blur, alpha=170, color=(4, 2, 10))
+    shadow = gfx.soft_shadow(size, radius, blur, alpha=80, color=Palette.SHADOW)
     gfx.blit_alpha(surface, shadow, (rect.x - 2 * blur, rect.y - 2 * blur + int(10 * scale)), alpha)
     frost(surface, rect, radius, alpha)
-    body = gfx.rounded_rect(size, radius, (34, 20, 56, 196), 1, (255, 255, 255, 40))
+    body = gfx.rounded_rect(size, radius, Palette.PANEL, 1, Palette.GLASS_EDGE)
     gfx.blit_alpha(surface, body, rect.topleft, alpha)
-    sheen = gfx.rounded_gradient(size, radius, ((0.0, (255, 255, 255, 22)), (0.4, (255, 255, 255, 0))))
+    sheen = gfx.rounded_gradient(size, radius, ((0.0, (255, 255, 255, 70)), (0.4, (255, 255, 255, 0))))
     gfx.blit_alpha(surface, sheen, rect.topleft, alpha)
 
 
@@ -115,7 +116,7 @@ class Widget:
         s = self.app.ui
         pad = max(3, int(4 * s))
         ring = gfx.rounded_outline(
-            (self.rect.w + pad * 2, self.rect.h + pad * 2), radius + pad, Palette.SKY, max(1.5, 2 * s)
+            (self.rect.w + pad * 2, self.rect.h + pad * 2), radius + pad, Palette.FOCUS, max(1.5, 2 * s)
         )
         gfx.blit_alpha(surface, ring, (self.rect.x - pad, self.rect.y - pad), self.focus * alpha)
 
@@ -159,16 +160,16 @@ class Button(Widget):
         x, y = self.rect.x, self.rect.y - lift
 
         if self.style == "primary":
-            glow = gfx.soft_shadow((w, h), radius, max(6, int(h * 0.3)), alpha=150, color=Palette.GOLD)
+            glow = gfx.soft_shadow((w, h), radius, max(6, int(h * 0.3)), alpha=150, color=Palette.ROSE)
             gfx.blit_center(surface, glow, (x + w / 2, y + h / 2 + 4 * s), alpha * (0.3 + 0.7 * self.hover))
-            gfx.blit_alpha(surface, gfx.rounded_gradient((w, h), radius, GOLD_STOPS), (x, y), alpha)
+            gfx.blit_alpha(surface, gfx.rounded_gradient((w, h), radius, PRIMARY_STOPS), (x, y), alpha)
             gfx.blit_alpha(
-                surface, gfx.rounded_outline((w, h), radius, (255, 245, 220, 150), max(1.0, s)), (x, y), alpha
+                surface, gfx.rounded_outline((w, h), radius, (255, 255, 255, 220), max(1.0, s)), (x, y), alpha
             )
             ink = Palette.INK_DARK
         else:
-            base = gfx.rounded_rect((w, h), radius, (255, 255, 255, 16), 1, (255, 255, 255, 46))
-            lit = gfx.rounded_rect((w, h), radius, (255, 255, 255, 34), 1, (*Palette.GOLD_LIGHT, 170))
+            base = gfx.rounded_rect((w, h), radius, Palette.GLASS, 1, Palette.GLASS_EDGE)
+            lit = gfx.rounded_rect((w, h), radius, Palette.GLASS_HOVER, 1, (*Palette.ROSE_DEEP, 150))
             gfx.blit_alpha(surface, base, (x, y), alpha)
             gfx.blit_alpha(surface, lit, (x, y), alpha * self.hover)
             ink = lerp_color(Palette.INK_SOFT, Palette.INK, self.hover)
@@ -201,6 +202,41 @@ class Button(Widget):
         gfx.blit_center(surface, label, (bx + d / 2, by + 10 * s), alpha)
 
 
+class Chip(Widget):
+    """A small selectable pill, one of a group such as Solo / 2 / 3 / 4."""
+
+    def __init__(self, app: App, label: str, selected: Callable[[], bool], on_click: Callable[[], None]) -> None:
+        super().__init__(app)
+        self.label = label
+        self.selected = selected
+        self.on_click = on_click
+
+    def activate(self) -> None:
+        self.app.audio.play("click")
+        self.on_click()
+
+    def draw(self, surface: pygame.Surface, alpha: float = 1.0) -> None:
+        s = self.app.ui
+        w, h = self.rect.size
+        radius = h // 2
+        x, y = self.rect.topleft
+        if self.selected():
+            gfx.blit_alpha(surface, gfx.rounded_gradient((w, h), radius, PRIMARY_STOPS), (x, y), alpha)
+            gfx.blit_alpha(
+                surface, gfx.rounded_outline((w, h), radius, (255, 255, 255, 230), max(1.0, s)), (x, y), alpha
+            )
+            ink, role = Palette.INK_DARK, "semibold"
+        else:
+            base = gfx.rounded_rect((w, h), radius, Palette.GLASS, 1, Palette.GLASS_EDGE)
+            lit = gfx.rounded_rect((w, h), radius, Palette.GLASS_HOVER, 1, (*Palette.ROSE_DEEP, 150))
+            gfx.blit_alpha(surface, base, (x, y), alpha)
+            gfx.blit_alpha(surface, lit, (x, y), alpha * self.hover)
+            ink, role = lerp_color(Palette.INK_MUTED, Palette.INK, self.hover), "medium"
+        text = gfx.text(self.app.fonts.get(role, 14 * s), self.label, ink)
+        gfx.blit_center(surface, text, (x + w / 2, y + h / 2), alpha)
+        self.draw_focus(surface, radius, alpha)
+
+
 class Toggle(Widget):
     """A labelled on/off switch spanning a settings row."""
 
@@ -226,7 +262,7 @@ class Toggle(Widget):
         s = self.app.ui
         x, y, w, h = self.rect
         radius = int(14 * s)
-        row = gfx.rounded_rect((w, h), radius, (255, 255, 255, 14))
+        row = gfx.rounded_rect((w, h), radius, (255, 255, 255, 110))
         gfx.blit_alpha(surface, row, (x, y), alpha * (0.4 + 0.6 * self.hover))
 
         pad = int(18 * s)
@@ -242,14 +278,14 @@ class Toggle(Widget):
 
         tw, th = int(48 * s), int(28 * s)
         tx, tyy = x + w - pad - tw, y + (h - th) // 2
-        off = gfx.rounded_rect((tw, th), th // 2, (255, 255, 255, 40), 1, (255, 255, 255, 50))
-        on = gfx.rounded_gradient((tw, th), th // 2, GOLD_STOPS)
+        off = gfx.rounded_rect((tw, th), th // 2, Palette.LINE)
+        on = gfx.rounded_gradient((tw, th), th // 2, ((0.0, Palette.ROSE), (1.0, Palette.LAVENDER_DEEP)))
         gfx.blit_alpha(surface, off, (tx, tyy), alpha)
         gfx.blit_alpha(surface, on, (tx, tyy), alpha * self.knob)
         kd = th - int(6 * s)
         knob = gfx.circle(kd, (255, 255, 255))
         kx = tx + int(3 * s) + (tw - kd - int(6 * s)) * self.knob
-        shadow = gfx.soft_shadow((kd, kd), kd // 2, max(2, int(3 * s)), alpha=110)
+        shadow = gfx.soft_shadow((kd, kd), kd // 2, max(2, int(3 * s)), alpha=90, color=Palette.SHADOW)
         gfx.blit_center(surface, shadow, (kx + kd / 2, tyy + th / 2 + s), alpha)
         gfx.blit_alpha(surface, knob, (kx, tyy + int(3 * s)), alpha)
         self.draw_focus(surface, radius, alpha)

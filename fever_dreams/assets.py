@@ -65,16 +65,22 @@ def card_radius(width: int) -> int:
 class CardArt:
     """The 22 dreamer faces and the card back, scaled and framed on demand.
 
+    Face ids beyond the 22 originals are variants of them: ``22..43`` are
+    mirror images and ``44..65`` close-up portraits, which is what makes a
+    50-pair board possible.
+
     Scaled cards are cached per size; only the few most recent sizes are
     kept so dragging the window edge doesn't pile up memory.
     """
 
     MAX_SIZES = 4
+    VARIANTS = 3  # original, mirrored, close-up
 
     def __init__(self) -> None:
         self.faces = [self._load(CARD_DIR / f"card{i}.png", 0.3) for i in range(1, FACE_COUNT + 1)]
         self.back_art = self._load(CARD_DIR / "card_back.png", 0.28)
         self._sizes: OrderedDict[tuple[int, int], dict] = OrderedDict()
+        self._variants: dict[int, pygame.Surface] = {}
 
     @staticmethod
     def _load(path: Path, bias: float) -> pygame.Surface:
@@ -84,7 +90,33 @@ class CardArt:
 
     @property
     def count(self) -> int:
+        """Number of original illustrations."""
         return len(self.faces)
+
+    def face_pool(self, pairs: int) -> int:
+        """How many face ids a board of ``pairs`` draws from."""
+        pool = self.count if pairs <= self.count else self.count * self.VARIANTS
+        if pairs > pool:
+            raise ValueError(f"only {pool} distinct faces for {pairs} pairs")
+        return pool
+
+    def _source(self, face: int) -> pygame.Surface:
+        base, variant = face % self.count, face // self.count
+        src = self.faces[base]
+        if variant == 0:
+            return src
+        cached = self._variants.get(face)
+        if cached is None:
+            if variant == 1:
+                cached = pygame.transform.flip(src, True, False)
+            else:
+                w, h = src.get_size()
+                cw = int(w * 0.62)
+                ch = int(cw / CARD_ASPECT)
+                crop = src.subsurface(((w - cw) // 2, int(h * 0.02), cw, ch))
+                cached = pygame.transform.smoothscale(crop, (w, h))
+            self._variants[face] = cached
+        return cached
 
     def _bucket(self, size: tuple[int, int]) -> dict:
         size = (int(size[0]), int(size[1]))
@@ -101,7 +133,7 @@ class CardArt:
         bucket = self._bucket(size)
         surf = bucket.get(index)
         if surf is None:
-            surf = bucket[index] = self._frame(self.faces[index], size, back=False)
+            surf = bucket[index] = self._frame(self._source(index), size, back=False)
         return surf
 
     def back(self, size: tuple[int, int]) -> pygame.Surface:
@@ -119,10 +151,10 @@ class CardArt:
         if back:
             # Calm the glare so revealed faces stand out, deepen the edges and
             # add an engraved inner frame.
-            img.fill((226, 218, 232), special_flags=pygame.BLEND_RGB_MULT)
+            img.fill((238, 232, 240), special_flags=pygame.BLEND_RGB_MULT)
             img.blit(
                 gfx.gradient(
-                    (w, h), ((0.0, (0, 0, 0, 70)), (0.25, (0, 0, 0, 0)), (0.75, (0, 0, 0, 0)), (1.0, (0, 0, 0, 90)))
+                    (w, h), ((0.0, (0, 0, 0, 40)), (0.25, (0, 0, 0, 0)), (0.75, (0, 0, 0, 0)), (1.0, (0, 0, 0, 56)))
                 ),
                 (0, 0),
             )
@@ -143,7 +175,7 @@ class CardArt:
 
     def shadow(self, size: tuple[int, int]) -> pygame.Surface:
         w = int(size[0])
-        return gfx.soft_shadow(size, card_radius(w), max(4, int(w * 0.07)), alpha=160, color=(6, 2, 14))
+        return gfx.soft_shadow(size, card_radius(w), max(4, int(w * 0.07)), alpha=120, color=Palette.SHADOW)
 
     def halo(self, size: tuple[int, int], color, alpha: int = 210) -> pygame.Surface:
         """A soft coloured glow around a card-sized shape; blit it centred."""

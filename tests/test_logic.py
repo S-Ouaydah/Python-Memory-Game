@@ -191,3 +191,68 @@ def test_star_rating_thresholds():
     assert star_rating(15, 6) == 2
     assert star_rating(16, 6) == 1
     assert star_rating(0, 0) == 0
+
+
+# -- hot-seat multiplayer --------------------------------------------------------
+
+
+def test_players_take_turns_on_a_miss_and_keep_turn_on_a_match():
+    game = make_game(pairs=4, players=3)
+    where = pair_indices(game)
+    assert game.current == 0
+
+    game.flip(where[0][0])
+    match = game.flip(where[0][1])
+    assert (match.player, match.next_player) == (0, 0)
+    assert game.current == 0 and game.player_pairs == [1, 0, 0]
+
+    game.flip(where[1][0])
+    miss = game.flip(where[2][0])
+    assert (miss.player, miss.next_player) == (0, 1)
+    assert game.current == 1
+
+    first = game.flip(where[1][1])  # resolves the wrong pair; now player 2's move
+    assert first.player == 1 and first.hidden
+    game.flip(where[1][0])
+    assert game.player_pairs == [1, 1, 0]
+    assert game.player_points == [100, 100, 0]
+
+
+def test_turn_wraps_around_and_streak_resets_per_turn():
+    game = make_game(pairs=4, players=2)
+    where = pair_indices(game)
+    for expected_next in (1, 0, 1):
+        game.flip(where[0][0])
+        game.flip(where[1][0])
+        assert game.current == expected_next
+        game.resolve_mismatch()
+    game.flip(where[0][0])
+    result = game.flip(where[0][1])
+    assert result.player == 1 and result.points == 100  # no multiplier carried over
+
+
+def test_leaders_handles_ties():
+    game = make_game(pairs=3, players=2)
+    where = pair_indices(game)
+    game.flip(where[0][0])
+    game.flip(where[0][1])
+    assert game.leaders == [0]
+    game.flip(where[1][0])
+    game.flip(where[2][0])  # player 0 misses; player 1's turn
+    game.flip(where[1][1])
+    game.flip(where[1][0])
+    assert game.player_pairs == [1, 1]
+    assert game.leaders == [0, 1]
+
+
+def test_solo_game_never_changes_player():
+    game = make_game(pairs=3)
+    a, b = mismatched_pair(game)
+    game.flip(a)
+    result = game.flip(b)
+    assert (result.player, result.next_player, game.current) == (0, 0, 0)
+
+
+def test_rejects_zero_players():
+    with pytest.raises(ValueError):
+        MemoryGame([1, 2], players=0)

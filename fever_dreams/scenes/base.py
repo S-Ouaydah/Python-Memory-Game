@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pygame
 
 from .. import gfx
+from ..config import Palette
 from ..tween import approach, ease_out_cubic
 from ..widgets import FocusGroup, Widget, draw_panel
 
@@ -128,7 +129,7 @@ class Modal:
         size = surface.get_size()
         if self._veil is None or self._veil.get_size() != size:
             self._veil = pygame.Surface(size, pygame.SRCALPHA)
-            self._veil.fill((8, 4, 18, int(255 * self.dim)))
+            self._veil.fill((*Palette.VEIL, int(255 * self.dim)))
         gfx.blit_alpha(surface, self._veil, (0, 0), alpha)
         panel = self.panel.move(0, self.offset)
         draw_panel(surface, panel, int(26 * self.app.ui), alpha, self.app.ui)

@@ -54,6 +54,10 @@ class FlipResult:
     points: int = 0
     streak: int = 0
     finished: bool = False
+    #: Who turned the card over.
+    player: int = 0
+    #: Whose turn it is now (differs from ``player`` after a miss).
+    next_player: int = 0
 
 
 @dataclass(frozen=True)
@@ -90,6 +94,9 @@ class MemoryGame:
     up (``pending``) until :meth:`resolve_mismatch` is called or the player
     flips another card, which resolves it automatically. The player never
     has to wait out a wrong guess.
+
+    With several ``players`` they take turns: a match earns another go, a
+    miss passes the turn to the next player.
     """
 
     def __init__(
@@ -97,11 +104,18 @@ class MemoryGame:
         faces: Sequence[int],
         rng: random.Random | None = None,
         glimpses: int = 1,
+        players: int = 1,
     ) -> None:
         if not faces:
             raise ValueError("a game needs at least one pair")
         if len(set(faces)) != len(faces):
             raise ValueError("faces must be unique")
+        if players < 1:
+            raise ValueError("a game needs at least one player")
+        self.players = players
+        self.current = 0
+        self.player_pairs = [0] * players
+        self.player_points = [0] * players
         deck = [face for face in faces for _ in range(2)]
         (rng or random.Random()).shuffle(deck)
         self.cards = [Card(face) for face in deck]
@@ -122,6 +136,12 @@ class MemoryGame:
     @property
     def finished(self) -> bool:
         return self.matches == self.pairs
+
+    @property
+    def leaders(self) -> list[int]:
+        """Players holding the most pairs (several on a tie)."""
+        best = max(self.player_pairs)
+        return [i for i, pairs in enumerate(self.player_pairs) if pairs == best]
 
     @property
     def first(self) -> int | None:
@@ -162,13 +182,14 @@ class MemoryGame:
         dismissing = self._pending is not None and index in self._pending
         hidden = self.resolve_mismatch()
         card = self.cards[index]
+        player = self.current
         if dismissing or card.state is not CardState.HIDDEN:
-            return FlipResult(Outcome.IGNORED, index, hidden=hidden)
+            return FlipResult(Outcome.IGNORED, index, hidden=hidden, player=player, next_player=player)
 
         card.state = CardState.REVEALED
         if self._first is None:
             self._first = index
-            return FlipResult(Outcome.FIRST, index, hidden=hidden)
+            return FlipResult(Outcome.FIRST, index, hidden=hidden, player=player, next_player=player)
 
         partner, self._first = self._first, None
         self.moves += 1
@@ -180,6 +201,8 @@ class MemoryGame:
             self.best_streak = max(self.best_streak, self.streak)
             points = round(BASE_PAIR_POINTS * streak_multiplier(self.streak))
             self.match_points += points
+            self.player_pairs[player] += 1
+            self.player_points[player] += points
             return FlipResult(
                 Outcome.MATCH,
                 index,
@@ -188,12 +211,15 @@ class MemoryGame:
                 points=points,
                 streak=self.streak,
                 finished=self.finished,
+                player=player,
+                next_player=player,
             )
 
         self.misses += 1
         self.streak = 0
         self._pending = (partner, index)
-        return FlipResult(Outcome.MISMATCH, index, partner, hidden)
+        self.current = (player + 1) % self.players
+        return FlipResult(Outcome.MISMATCH, index, partner, hidden, player=player, next_player=self.current)
 
     def resolve_mismatch(self) -> tuple[int, ...]:
         """Turn a pending mismatched pair face down; returns their indices."""

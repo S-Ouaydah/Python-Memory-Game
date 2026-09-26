@@ -86,7 +86,7 @@ class Effects:
         y: float,
         count: int = 18,
         speed: float = 260,
-        colors=(Palette.GOLD_LIGHT, Palette.GOLD, (255, 255, 255), Palette.ROSE),
+        colors=(Palette.GOLD, Palette.ROSE_DEEP, Palette.LAVENDER_DEEP, Palette.SKY_DEEP),
         scale: float = 1.0,
     ) -> None:
         for _ in range(count):
@@ -108,7 +108,7 @@ class Effects:
                 )
             )
 
-    def ring(self, x: float, y: float, radius: float, color=Palette.GOLD_LIGHT, life=0.7) -> None:
+    def ring(self, x: float, y: float, radius: float, color=Palette.GOLD, life=0.7) -> None:
         p = Particle(x, y, 0, 0, life, ring_texture(tuple(color)), kind="ring", size=radius)
         self.particles.append(p)
 
