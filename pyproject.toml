@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fever-dreams"
+dynamic = ["version"]
+description = "A memory game of drifting blossoms, built with pygame-ce."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "S-Ouaydah" }]
+requires-python = ">=3.10"
+dependencies = ["pygame-ce>=2.4"]
+keywords = ["game", "memory", "pairs", "pygame"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Topic :: Games/Entertainment :: Puzzle Games",
+    "License :: OSI Approved :: MIT License",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
+
+[project.scripts]
+fever-dreams = "fever_dreams.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "fever_dreams.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["fever_dreams*"]
+
+[tool.setuptools.package-data]
+fever_dreams = ["assets/cards/*.png", "assets/fonts/*.ttf", "assets/fonts/*.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["B905"]  # zip() strictness adds noise for fixed-length pairs
