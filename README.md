@@ -144,7 +144,11 @@ python tools/capture_screenshots.py      # regenerate docs/screenshots
 ## From notebook to game
 
 This started life as a Tkinter game in a Jupyter notebook, written while I was learning
-Python. The rewrite fixes everything that audit turned up:
+Python. Here's the original, running unmodified:
+
+<p align="center"><img src="docs/screenshots/original.jpg" alt="The original Tkinter version" width="70%"></p>
+
+The rewrite fixes everything the audit turned up:
 
 - **Clicking during a check misbehaved.** `update()` calls inside the flip code ran queued
   clicks mid-check, so a third card could turn over while a pair was being compared,

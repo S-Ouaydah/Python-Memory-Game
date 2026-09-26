@@ -161,6 +161,9 @@ class CardSprite:
         gfx.blit_alpha(surface, img, (left, top), alpha)
 
         radius = card_radius(w)
+        if self.shake_age is not None:  # a wrong guess: a rose rim that fades with the shake
+            rim = gfx.rounded_outline((w, h), radius, Palette.DANGER, max(2.0, w / 50))
+            gfx.blit_alpha(surface, _fit(rim, (cw, ch)), (left, top), alpha * (1 - self.shake_age / SHAKE_TIME))
         if self.hover > 0.02 and not self.face_up:
             rim = gfx.rounded_outline((w, h), radius, Palette.LAVENDER_DEEP, max(1.5, w / 80))
             gfx.blit_alpha(surface, _fit(rim, (cw, ch)), (left, top), alpha * self.hover * 0.9)
